@@ -22,8 +22,8 @@ _embed_model = None
 _faiss_index = None
 _metadata = None
 
-# System prompt to ensure Arabic output without breaking whitespace generation
-SYSTEM_PROMPT = "أجب دائماً باللغة العربية الفصحى الواضحة."
+# System prompt to ensure the output matches the user's language
+SYSTEM_PROMPT = """You are a helpful, knowledgeable assistant. Reply in the SAME language as the user's question (Arabic → Arabic, English → English)."""
 
 
 def clean_arabic_text(text: str) -> str:
@@ -83,14 +83,21 @@ def _get_metadata():
     return _metadata
 
 
-def retrieve(query: str, top_k: int = 5) -> tuple:
+def retrieve(query: str, top_k: int = 5, dynamic_index: dict = None) -> tuple:
     """
     Embed query and retrieve top_k most similar chunks.
+    If dynamic_index is provided (keys: 'index', 'metadata'), it is used
+    instead of the disk-based index (for uploaded PDFs).
     Returns (chunks_list, retrieval_time_seconds).
     """
     model = _get_embed_model()
-    index = _get_faiss_index()
-    metadata = _get_metadata()
+
+    if dynamic_index:
+        index = dynamic_index["index"]
+        metadata = dynamic_index["metadata"]
+    else:
+        index = _get_faiss_index()
+        metadata = _get_metadata()
 
     start = time.time()
     q_emb = model.encode([f"query: {query}"], normalize_embeddings=True)
@@ -133,69 +140,67 @@ def _expand_query(query: str) -> list:
     return queries
 
 
-def retrieve_multi(query: str, top_k: int = 5) -> tuple:
+def retrieve_multi(query: str, top_k: int = 5, dynamic_index: dict = None) -> tuple:
     """
-    Search using multiple query variants (aliases) and merge + deduplicate results.
+    Search using multiple query variants and merge + deduplicate results.
+    If dynamic_index is provided, skips alias expansion (book-agnostic mode).
     Returns (chunks_list, retrieval_time).
     """
-    queries = _expand_query(query)
+    # Only use aliases for the hardcoded book; skip for uploaded PDFs
+    queries = [query] if dynamic_index else _expand_query(query)
     seen_ids = set()
     all_chunks = []
     start = time.time()
 
     for q in queries:
-        chunks, _ = retrieve(q, top_k=top_k)
+        chunks, _ = retrieve(q, top_k=top_k, dynamic_index=dynamic_index)
         for c in chunks:
             if c["chunk_id"] not in seen_ids:
                 seen_ids.add(c["chunk_id"])
                 all_chunks.append(c)
 
-    # Sort by score descending and take the best top_k
     all_chunks.sort(key=lambda x: x.get("score", 0), reverse=True)
     retrieval_time = round(time.time() - start, 3)
     return all_chunks[:top_k], retrieval_time
 
 
-CHARACTER_FACTS = """حقائق أساسية عن الكتاب (استخدمها فقط عند الحاجة):
-- عنوان الكتاب: أرض زيكولا
-- المؤلف: عمرو عبد الحميد
-- بطل القصة / الشخصية الرئيسية: خالد حسني
-- حبيبة خالد: منى
-- جد خالد: عبدو
-- نوع القصة: رواية مغامرات وفانتازيا عربية
-"""
-
-
-def build_rag_prompt(question: str, chunks: list, history: list = None) -> str:
-    """Build the Arabic RAG prompt with context and optional history."""
+def build_rag_prompt(question: str, chunks: list, history: list = None,
+                    book_name: str = None) -> str:
+    """
+    Build the RAG prompt with 3-way behavior:
+    1. Book question + in context  → answer from context
+    2. Book question + not in context → answer from general knowledge
+    3. Completely unrelated question → politely refuse
+    """
     context = "\n\n---\n\n".join([c["text"] for c in chunks])
-    
+
     hist_str = ""
-    if history and len(history) > 0:
-        hist_str = "سجل المحادثة السابقة (استخدمه لفهم السياق والضمائر في السؤال الحالي):\n"
-        for msg in history[-10:]:  # keep last 5 turns
-            role = "المستخدم" if msg["role"] == "user" else "الذكاء الاصطناعي"
+    if history:
+        hist_str = "Previous conversation:\n"
+        for msg in history[-10:]:
+            role = "User" if msg["role"] == "user" else "Assistant"
             hist_str += f"{role}: {msg['content']}\n"
         hist_str += "\n"
 
-    prompt = f"""أنت مساعد ذكي متخصص في الإجابة عن أسئلة حول كتاب "أرض زيكولا" للكاتب عمرو عبد الحميد.
+    book_intro = f'"{book_name}"' if book_name else "the uploaded book"
 
-تعليمات صارمة يجب اتباعها حرفياً:
-1. أجب فقط وحصرياً بناءً على السياق المقدم أدناه. لا تخترع أو تضف أي معلومة غير موجودة في السياق.
-2. إذا كان السياق لا يحتوي على إجابة واضحة، قل بالضبط: "لا يوجد في النص المتاح إجابة على هذا السؤال."
-3. أجب باللغة العربية الفصحى السليمة فقط.
-4. لا تستخدم أي لغة أخرى غير العربية إطلاقاً.
-5. كن دقيقاً في أسماء الشخصيات ولا تخلط بينها.
-6. إذا كان السؤال يحتوي على ضمائر أو إشارات (مثل "هو"، "هذا الرجل"، "معه"، "ماذا فعل")، استخدم سجل المحادثة أدناه لفهم المقصود بالضمير ثم أجب بناءً على السياق.
+    prompt = f"""You are a dedicated book assistant specializing in {book_intro}.
 
-{CHARACTER_FACTS}
-{hist_str}السياق المتاح من الكتاب:
+YOUR RULES:
+1. You only discuss topics related to this book — its plot, characters, themes, author, genre, writing style, or anything a reader might reasonably ask about it.
+2. If the user asks about something unrelated to the book (e.g., cooking, coding, sports, general trivia), politely decline and redirect them: say something like "I'm here to help you with {book_intro}. Is there something about the book you'd like to know?"
+3. To answer book-related questions, first check the context passages below. If the answer is there, use it.
+4. If the context does NOT contain the answer but the question is still about the book, use your general knowledge about books, storytelling, and the topic to give a helpful answer — do not say "not found".
+5. Always reply in the SAME LANGUAGE as the user's question.
+6. Use the conversation history to resolve pronouns and follow-up references.
+
+{hist_str}Context passages from the book (use when relevant):
 {context}
 
-السؤال الحالي:
+User question:
 {question}
 
-الإجابة (بناءً على السياق وسجل المحادثة):"""
+Answer:"""
     return prompt
 
 
@@ -235,9 +240,11 @@ def _build_followup_query(question: str, history: list) -> str:
     return " ".join(parts)
 
 
-def ask(question: str, model: str = None, top_k: int = 2, history: list = None) -> dict:
+def ask(question: str, model: str = None, top_k: int = 2, history: list = None,
+        dynamic_index: dict = None, book_name: str = None) -> dict:
     """
     Full RAG pipeline: retrieve → build prompt → generate answer.
+    Pass dynamic_index + book_name for uploaded PDFs.
     """
     from rag.ollama_client import generate
 
@@ -245,17 +252,14 @@ def ask(question: str, model: str = None, top_k: int = 2, history: list = None) 
         cfg = _load_config()
         model = cfg.get("chosen_model") or cfg["models"][0]
 
-    # Build enriched search query for follow-ups
     search_query = _build_followup_query(question, history)
-    
-    # Use more chunks for follow-up questions (short questions = likely follow-ups)
     effective_top_k = top_k + 1 if history and len(question.split()) < 10 else top_k
-        
-    chunks, retrieval_time = retrieve_multi(search_query, top_k=effective_top_k)
+
+    chunks, retrieval_time = retrieve_multi(search_query, top_k=effective_top_k,
+                                            dynamic_index=dynamic_index)
     chunk_ids = [c["chunk_id"] for c in chunks]
 
-    # Build prompt and generate
-    rag_prompt = build_rag_prompt(question, chunks, history)
+    rag_prompt = build_rag_prompt(question, chunks, history, book_name=book_name)
     start = time.time()
     result = generate(model, rag_prompt, system=SYSTEM_PROMPT, temperature=0.2, max_tokens=512)
     generation_time = round(time.time() - start, 3)
@@ -269,28 +273,25 @@ def ask(question: str, model: str = None, top_k: int = 2, history: list = None) 
         "chunks": chunks,
     }
 
-def ask_stream(question: str, model: str = None, top_k: int = 2, history: list = None):
+def ask_stream(question: str, model: str = None, top_k: int = 2, history: list = None,
+               dynamic_index: dict = None, book_name: str = None):
     from rag.ollama_client import generate_stream
 
     if model is None:
         cfg = _load_config()
         model = cfg.get("chosen_model") or cfg["models"][0]
 
-    # Build enriched search query for follow-ups
     search_query = _build_followup_query(question, history)
-    
-    # Use more chunks for follow-up questions (short questions = likely follow-ups)
     effective_top_k = top_k + 1 if history and len(question.split()) < 10 else top_k
-        
-    chunks, retrieval_time = retrieve_multi(search_query, top_k=effective_top_k)
+
+    chunks, retrieval_time = retrieve_multi(search_query, top_k=effective_top_k,
+                                            dynamic_index=dynamic_index)
     chunk_ids = [c["chunk_id"] for c in chunks]
 
-    # Build prompt and generate stream
-    rag_prompt = build_rag_prompt(question, chunks, history)
-    
+    rag_prompt = build_rag_prompt(question, chunks, history, book_name=book_name)
     start = time.time()
     raw_stream = generate_stream(model, rag_prompt, system=SYSTEM_PROMPT, temperature=0.2, max_tokens=512)
-    
+
     return raw_stream, chunk_ids, retrieval_time, start
 
 
@@ -300,7 +301,7 @@ def ask_llm_only(question: str, model: str = None) -> dict:
         cfg = _load_config()
         model = cfg.get("chosen_model") or cfg["models"][0]
 
-    prompt = f"""أجب بشكل مختصر جدا (لا تتجاوز 100 كلمة):\n\nالسؤال:\n{question}\n\nالإجابة:"""
+    prompt = f"""أجب بشكل مختصر جدا وبنفس لغة السؤال (لا تتجاوز 100 كلمة):\n\nالسؤال:\n{question}\n\nالإجابة:"""
     start = time.time()
     result = generate(model, prompt, temperature=0.3, max_tokens=150)
     generation_time = round(time.time() - start, 3)
@@ -319,7 +320,7 @@ def ask_llm_only_stream(question: str, model: str = None):
         cfg = _load_config()
         model = cfg.get("chosen_model") or cfg["models"][0]
 
-    prompt = f"""أجب بشكل مختصر جدا (لا تتجاوز 100 كلمة):\n\nالسؤال:\n{question}\n\nالإجابة:"""
+    prompt = f"""أجب بشكل مختصر جدا وبنفس لغة السؤال (لا تتجاوز 100 كلمة):\n\nالسؤال:\n{question}\n\nالإجابة:"""
     start = time.time()
     stream = generate_stream(model, prompt, temperature=0.3, max_tokens=150)
     

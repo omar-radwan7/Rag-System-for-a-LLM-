@@ -18,6 +18,7 @@ sys.path.insert(0, PROJECT_ROOT)
 
 from rag.rag_pipeline import ask, ask_llm_only
 from rag.ollama_client import list_models
+from rag.pdf_indexer import build_memory_index
 
 CONFIG_PATH = os.path.join(PROJECT_ROOT, "config.json")
 CHAT_STORAGE_PATH = os.path.join(PROJECT_ROOT, "ui", "chat_storage.json")
@@ -46,7 +47,7 @@ def save_chat_sessions(sessions):
 def create_new_session():
     return {
         "id": str(uuid.uuid4()),
-        "title": "محادثة جديدة",
+        "title": "New Chat",
         "date": datetime.now().strftime("%Y-%m-%d"),
         "messages": []
     }
@@ -54,7 +55,7 @@ def create_new_session():
 
 # ─── Page Config ───
 st.set_page_config(
-    page_title="المساعد الذكي",
+    page_title="AI Assistant",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -135,7 +136,7 @@ html, body, [class*="st-"] {
 
 /* ── New Chat button OVERRIDE (using primary kind or type) ── */
 [data-testid="stSidebar"] button[kind="primary"],
-[data-testid="stSidebar"] div[class*="stButton"] button:has(p:contains("محادثة جديدة")),
+[data-testid="stSidebar"] div[class*="stButton"] button:has(p:contains("New Chat")),
 [data-testid="stSidebar"] button[kind="primary"] {
     background: transparent !important;
     color: #ececec !important;
@@ -169,7 +170,7 @@ html, body, [class*="st-"] {
     font-size: 14px !important;
     font-weight: 400 !important;
     padding: 8px 12px !important;
-    text-align: right !important;
+    text-align: left !important;
     box-shadow: none !important;
     transition: background 0.15s !important;
     height: 38px !important;
@@ -183,7 +184,7 @@ html, body, [class*="st-"] {
 [data-testid="stSidebar"] [data-testid="stColumn"]:nth-of-type(1) div[class*="stButton"] button p,
 [data-testid="stSidebar"] [data-testid="column"]:nth-of-type(1) div[class*="stButton"] button p,
 [data-testid="stSidebar"] button[kind="secondary"] p {
-    text-align: right !important;
+    text-align: left !important;
     width: 100% !important;
     margin: 0 !important;
 }
@@ -242,8 +243,8 @@ html, body, [class*="st-"] {
 .bot-msg {
     background: transparent;
     color: #e0e0e0;
-    direction: rtl;
-    text-align: right;
+    direction: ltr;
+    text-align: left;
     white-space: pre-wrap;
     word-break: break-word;
 }
@@ -268,8 +269,8 @@ html, body, [class*="st-"] {
 }
 
 .stTextInput > div > div > input {
-    direction: rtl;
-    text-align: right;
+    direction: ltr;
+    text-align: left;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -299,10 +300,10 @@ def get_current_session_index():
 
 # ─── Sidebar ───
 with st.sidebar:
-    st.markdown("### المحادثات")
+    st.markdown("### Chats")
 
     # New Chat button — styled
-    if st.button("+ محادثة جديدة", use_container_width=True, key="new_chat_btn", type="primary"):
+    if st.button("+ New Chat", use_container_width=True, key="new_chat_btn", type="primary"):
         # Prevent spamming new empty chats
         if st.session_state.chat_sessions[0]["messages"]:
             new_sess = create_new_session()
@@ -315,10 +316,10 @@ with st.sidebar:
             st.session_state.current_session = st.session_state.chat_sessions[0]["id"]
             st.rerun()
 
-    # Chat list — skip empty "محادثة جديدة" sessions to avoid duplication
+    # Chat list — skip empty "New Chat" sessions to avoid duplication
     for session in st.session_state.chat_sessions:
-        # Don't show empty "محادثة جديدة" in the list (the button above handles that)
-        if not session["messages"] and session["title"] == "محادثة جديدة":
+        # Don't show empty "New Chat" in the list (the button above handles that)
+        if not session["messages"] and session["title"] == "New Chat":
             continue
 
         sid   = session["id"]
@@ -331,7 +332,7 @@ with st.sidebar:
                 st.rerun()
 
         with col2:
-            if st.button("🗑", key=f"del_{sid}", help="حذف المحادثة", use_container_width=True):
+            if st.button("🗑", key=f"del_{sid}", help="Delete Chat", use_container_width=True):
                 st.session_state.chat_sessions = [
                     s for s in st.session_state.chat_sessions if s["id"] != sid
                 ]
@@ -345,7 +346,7 @@ with st.sidebar:
                 st.rerun()
 
     st.markdown("---")
-    st.markdown("**الإعدادات**")
+    st.markdown("**Settings**")
 
     cfg = load_config()
     try:
@@ -359,11 +360,62 @@ with st.sidebar:
     if not available:
         available = [chosen]
     default_idx = available.index(chosen) if chosen in available else 0
-    selected_model = st.selectbox("النموذج", available, index=default_idx)
+    selected_model = st.selectbox("Model", available, index=default_idx)
 
-    use_rag = st.toggle("استخدام مصادر RAG", value=True)
-    show_sources = st.toggle("إظهار المصادر", value=True)
-    top_k = st.slider("عدد المصادر", 1, 5, 2)
+    use_rag = st.toggle("Use RAG Sources", value=True)
+    show_sources = st.toggle("Show Sources", value=True)
+    top_k = st.slider("Number of Sources", 1, 5, 2)
+
+    # ─── PDF Upload ───
+    st.markdown("---")
+    st.markdown("**📚 Book**")
+
+    uploaded_pdf = st.file_uploader(
+        "Upload a PDF book",
+        type=["pdf"],
+        help="Upload any PDF — the system will read it and answer your questions about it.",
+        key="pdf_uploader",
+    )
+
+    # Process newly uploaded PDF
+    if uploaded_pdf is not None:
+        pdf_name = uploaded_pdf.name
+        prev_name = st.session_state.get("loaded_book_name")
+
+        if pdf_name != prev_name:
+            # New book uploaded — build index
+            with st.spinner(f"📖 Reading '{pdf_name}'..."):
+                try:
+                    pdf_bytes = uploaded_pdf.read()
+                    book_index = build_memory_index(pdf_bytes)
+                    # book_index has keys: 'index', 'metadata', 'chunk_count', 'text_preview'
+                    st.session_state["book_index"] = book_index  # full dict passed to ask_stream
+                    st.session_state["loaded_book_name"] = pdf_name
+                    st.success(f"✅ '{pdf_name}' loaded — {book_index['chunk_count']} chunks")
+
+                    # If there's an active conversation, insert a system notice
+                    current_idx = get_current_session_index()
+                    curr_msgs = st.session_state.chat_sessions[current_idx]["messages"]
+                    if curr_msgs and prev_name:
+                        notice = f"📚 **Book switched to '{pdf_name}'**. Previous context from '{prev_name}' has been cleared. Ask your questions about the new book!"
+                        curr_msgs.append({"role": "assistant", "content": notice, "sources": [], "latency": ""})
+                        save_chat_sessions(st.session_state.chat_sessions)
+                        st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Could not process PDF: {e}")
+    else:
+        # PDF was removed — clear index
+        if st.session_state.get("loaded_book_name"):
+            st.session_state.pop("dynamic_index", None)
+            st.session_state.pop("book_index", None)
+            st.session_state.pop("loaded_book_name", None)
+
+    # Show currently loaded book
+    loaded = st.session_state.get("loaded_book_name")
+    if loaded:
+        st.caption(f"📖 Active: **{loaded}**")
+    else:
+        st.caption("📖 No book uploaded — using built-in dataset")
 
 
 # Display chat history
@@ -373,7 +425,7 @@ current_messages = st.session_state.chat_sessions[current_idx]["messages"]
 if not current_messages:
     st.markdown("""
     <div class="main-header">
-        <h1>كـيـف يـمـكـنـنـي مـسـاعـدتـك الـيـوم؟</h1>
+        <h1>How can I help you today?</h1>
     </div>
     """, unsafe_allow_html=True)
 
@@ -385,20 +437,20 @@ for msg in current_messages:
         st.markdown(f'<div class="chat-message bot-msg">{msg["content"]}</div>',
                     unsafe_allow_html=True)
         if show_sources and msg.get("sources"):
-            chips = " ".join([f'<span class="source-chip">مقطع {s}</span>' for s in msg["sources"]])
-            st.markdown(f"المصادر: {chips}", unsafe_allow_html=True)
+            chips = " ".join([f'<span class="source-chip">Chunk {s}</span>' for s in msg["sources"]])
+            st.markdown(f"Sources: {chips}", unsafe_allow_html=True)
         if msg.get("latency"):
             st.markdown(f'<span class="latency-badge">{msg["latency"]}</span>',
                         unsafe_allow_html=True)
 
 # ─── Chat Input ───
-user_input = st.chat_input("اسألني أي شيء...")
+user_input = st.chat_input("Ask me anything...")
 
 if user_input:
     current_idx = get_current_session_index()
     curr_session = st.session_state.chat_sessions[current_idx]
     
-    if not curr_session["messages"] or curr_session["title"] == "محادثة جديدة":
+    if not curr_session["messages"] or curr_session["title"] == "New Chat":
         curr_session["title"] = user_input[:25] + ("..." if len(user_input) > 25 else "")
     
     curr_session["messages"].append({"role": "user", "content": user_input})
@@ -407,12 +459,20 @@ if user_input:
     st.markdown(f'<div class="chat-message user-msg">{user_input}</div>',
                 unsafe_allow_html=True)
 
-    with st.spinner("جاري التفكير..."):
+    with st.spinner("Thinking..."):
         try:
             chat_history = curr_session["messages"][:-1]
+            # Get dynamic index if a PDF is loaded
+            d_index = st.session_state.get("book_index")
+            b_name = st.session_state.get("loaded_book_name")
             if use_rag:
                 from rag.rag_pipeline import ask_stream
-                stream, sources, ret_time, start_time = ask_stream(user_input, model=selected_model, top_k=top_k, history=chat_history)
+                stream, sources, ret_time, start_time = ask_stream(
+                    user_input, model=selected_model, top_k=top_k,
+                    history=chat_history,
+                    dynamic_index=d_index,
+                    book_name=b_name,
+                )
             else:
                 from rag.rag_pipeline import ask_llm_only_stream
                 stream, sources, ret_time, start_time = ask_llm_only_stream(user_input, model=selected_model)
@@ -424,10 +484,10 @@ if user_input:
                 msg_container.markdown(f'<div class="chat-message bot-msg">{full_answer}</div>', unsafe_allow_html=True)
 
             gen_time = round(time.time() - start_time, 3)
-            latency_str = f"استرجاع: {ret_time}ث | توليد: {gen_time}ث"
+            latency_str = f"Retrieval: {ret_time}s | Generation: {gen_time}s"
             answer = full_answer
         except Exception as e:
-            answer = f"خطأ: {str(e)}"
+            answer = f"Error: {str(e)}"
             sources = []
             latency_str = ""
             msg_container = st.empty()
@@ -444,8 +504,8 @@ if user_input:
     save_chat_sessions(st.session_state.chat_sessions)
 
     if show_sources and sources:
-        chips = " ".join([f'<span class="source-chip">مقطع {s}</span>' for s in sources])
-        st.markdown(f"المصادر: {chips}", unsafe_allow_html=True)
+        chips = " ".join([f'<span class="source-chip">Chunk {s}</span>' for s in sources])
+        st.markdown(f"Sources: {chips}", unsafe_allow_html=True)
     if latency_str:
         st.markdown(f'<span class="latency-badge">{latency_str}</span>',
                     unsafe_allow_html=True)
