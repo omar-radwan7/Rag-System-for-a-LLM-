@@ -1,238 +1,127 @@
-# RAG System for an LLM
+BookMind RAG: Local AI Book Assistant
+=======================================
 
-A full Retrieval-Augmented Generation (RAG) pipeline built in Python, designed to enhance LLM responses with document-grounded context. The system runs entirely locally using **Ollama** for LLM inference, retrieves relevant information from a knowledge base using vector similarity search, and injects it into the prompt—significantly improving factual accuracy and reducing hallucinations.
+BookMind is a high-performance, Retrieval-Augmented Generation (RAG) system designed to turn any PDF book into an interactive, knowledgeable companion. Built with a privacy-first philosophy, the entire pipeline runs locally using Ollama, ensuring your documents and conversations never leave your machine.
 
----
-
-## Overview
-
-Large Language Models often produce confident but incorrect answers when asked about domain-specific or up-to-date information. This project addresses that limitation by implementing a RAG pipeline that:
-
-1. Ingests and chunks documents into a vector store
-2. Embeds user queries and retrieves the most semantically relevant chunks
-3. Augments the LLM prompt with the retrieved context using a **locally-running Ollama model**
-4. Evaluates response quality using automated metrics
-
-### Why Local with Ollama?
-
-- **No API costs** — Run inference completely offline, no external API calls
-- **Privacy** — Your documents and queries never leave your machine
-- **Control** — Choose your model, adjust parameters, debug freely
-- **Speed** — Latency depends only on hardware, not network
+Whether you're exploring the built-in knowledge base or uploading your own collection, BookMind provides grounded, accurate answers with deep context awareness and multilingual support (optimized for Arabic and English).
 
 ---
 
-## Features
+Key Features
+------------
 
-- **Document Ingestion** — Processes and chunks raw documents for vector storage
-- **Semantic Retrieval** — Embeds queries and performs similarity search to find relevant context
-- **Local LLM Integration** — Uses Ollama to run open-source models (Mistral, Llama 2, Neural Chat, etc.) for grounded response generation
-- **Evaluation Pipeline** — Measures retrieval and generation quality using automated metrics (precision, recall, faithfulness)
-- **Streamlit UI** — Interactive web interface for querying the system with real-time responses
-- **Survey & Results** — Structured evaluation results and benchmarking data
-- **Configurable** — JSON-based configuration for models, chunking, retrieval parameters, and Ollama settings
-
----
-
-## Project Structure
-
-```
-Rag-System-for-an-LLM/
-├── rag/                  # Core RAG pipeline (ingestion, retrieval, generation)
-├── eval/                 # Evaluation scripts and metrics
-├── results/              # Benchmark results and output logs
-├── survey/               # Survey data used for evaluation
-├── ui/                   # Streamlit frontend
-├── data/                 # Input documents and knowledge base
-├── config.json           # Pipeline configuration (models, chunking, Ollama settings)
-├── eval_output.log       # Evaluation run logs
-├── streamlit_output.log  # UI run logs
-└── README.md
-```
+- Dynamic PDF Support: Upload any PDF book directly through the UI. The system automatically extracts text, chunks content, and builds an in-memory vector index in seconds.
+- Local-First Architecture: Powered by Ollama. No API keys, no subscription costs, and 100% data privacy.
+- Multilingual Mastery: Specialized support for Arabic and English, featuring a custom-designed Streamlit UI with Noto Naskh Arabic typography and RTL support.
+- 3-Way Context Logic:
+    1. In-Context: Answers directly from the book's text.
+    2. General Knowledge: Answers book-related questions using its internal training if the context is missing.
+    3. Refusal Logic: Politely declines unrelated topics (e.g., cooking or sports) to stay focused on the book.
+- Real-time Feedback: Streaming responses for a natural chat experience, with transparent latency tracking for both retrieval and generation.
+- Source Transparency: Every answer includes clickable source chips showing exactly which chunks were retrieved from the text.
+- Chat History: Persistent session management—save, rename, and return to your conversations later.
 
 ---
 
-## Tech Stack
+Tech Stack
+----------
 
-| Component        | Technology                                    |
-|-----------------|-----------------------------------------------|
-| Language         | Python 3.9+                                   |
-| Local LLM        | **Ollama** (Mistral, Llama 2, Neural Chat)   |
-| Embeddings       | Sentence Transformers (all-MiniLM-L6-v2)    |
-| Vector Store     | FAISS / ChromaDB                              |
-| UI               | Streamlit                                     |
-| Evaluation       | Custom metrics (precision, recall, faithfulness) |
+| Component | Technology |
+| --- | --- |
+| Language | Python 3.9+ |
+| LLM Inference | Ollama (Mistral, Llama 3, Qwen 2.5) |
+| Embeddings | intfloat/multilingual-e5-small |
+| Vector Database | FAISS (FlatIP for high-precision similarity) |
+| PDF Processing | pypdf |
+| Frontend | Streamlit (Custom Glassmorphic CSS) |
+| Logic | Sentence Transformers & NumPy |
 
 ---
 
-## Getting Started
+Getting Started
+---------------
 
-### Prerequisites
+Prerequisites
+~~~~~~~~~~~~~
+- Ollama installed and running.
+- Python 3.9 or higher.
 
-- Python 3.9+
-- pip
-- **Ollama** installed and running ([download here](https://ollama.ai))
-
-### Installation
-
+Installation
+~~~~~~~~~~~~
 ```bash
 # Clone the repository
 git clone https://github.com/omar-radwan7/Rag-System-for-an-LLM-.git
 cd Rag-System-for-an-LLM-
 
-# Install Python dependencies
+# Create and activate virtual environment
+python -m venv venv
+source venv/bin/activate  # Windows: venv\Scripts\activate
+
+# Install dependencies
 pip install -r requirements.txt
 ```
 
-### Ollama Setup
-
-1. **Install Ollama** from [ollama.ai](https://ollama.ai)
-2. **Pull a model** (choose one):
-   ```bash
-   ollama pull mistral      # Fast, good quality
-   ollama pull llama2       # Larger, more capable
-   ollama pull neural-chat  # Optimized for chat
-   ```
-3. **Start Ollama server** (runs on `http://localhost:11434` by default):
-   ```bash
-   ollama serve
-   ```
-
-### Configuration
-
-Edit `config.json` to set your model, chunking strategy, retrieval parameters, and Ollama settings:
-
-```json
-{
-  "ollama_model": "mistral",
-  "ollama_base_url": "http://localhost:11434",
-  "chunk_size": 512,
-  "chunk_overlap": 50,
-  "top_k": 5,
-  "temperature": 0.7,
-  "max_tokens": 256
-}
+Model Setup
+~~~~~~~~~~~
+Pull the recommended model for Arabic/English performance:
+```bash
+ollama pull qwen2.5:3b  # Fast and highly capable for multilingual tasks
 ```
 
-### Run the UI
-
+Run the App
+~~~~~~~~~~~
 ```bash
 streamlit run ui/app.py
 ```
 
-Open your browser to `http://localhost:8501` and start querying your documents.
+---
 
-### Run Evaluation
+Project Structure
+-----------------
 
+```text
+Rag-System-for-an-LLM/
+├── rag/                 # Core Intelligence
+│   ├── pdf_indexer.py   # In-memory PDF processing & FAISS building
+│   ├── rag_pipeline.py  # Prompt engineering & retrieval logic
+│   └── ollama_client.py # Ollama API integration
+├── ui/                  # Frontend
+│   ├── app.py           # Streamlit Chat Interface
+│   └── chat_storage.json# Persistent session data
+├── eval/                # Quality Assurance
+│   ├── eval_runner.py   # Automated benchmarking script
+│   └── gold_questions.json # Ground-truth test set
+├── data/                # Sample dataset & cleaning scripts
+├── results/             # Performance logs & evaluation reports
+└── config.json          # System-wide settings (models, top_k, etc.)
+```
+
+---
+
+Evaluation and Benchmarking
+---------------------------
+
+BookMind includes a dedicated evaluation framework to ensure accuracy and minimize hallucinations. The eval_runner.py script measures:
+- Retrieval Accuracy: How well the system finds relevant chunks.
+- Response Latency: End-to-end timing for retrieval vs. generation.
+- Faithfulness: Consistency between the retrieved context and the generated answer.
+
+Run evaluation:
 ```bash
-python eval/evaluate.py
-```
-
-Results will be saved to `results/` and logged in `eval_output.log`.
-
----
-
-## How It Works
-
-```
-User Query
-    │
-    ▼
-Embed Query (Sentence Transformers)
-    │
-    ▼
-Vector Similarity Search (FAISS / ChromaDB)
-    │
-    ▼
-Retrieve Top-K Relevant Chunks
-    │
-    ▼
-Augment LLM Prompt with Context
-    │
-    ▼
-Generate Response via Ollama (Local)
-    │
-    ▼
-Evaluate (Faithfulness, Relevance, Recall)
+python eval/eval_runner.py
 ```
 
 ---
 
-## Example Usage
-
-### Via Streamlit UI
-
-1. Streamlit loads your documents from `data/`
-2. Enter a query: *"What are the key benefits of the pension plan?"*
-3. The system retrieves relevant chunks and generates a grounded response
-4. View retrieved context alongside the answer
-
-### Via Python API
-
-```python
-from rag.pipeline import RAGPipeline
-
-# Initialize pipeline with Ollama
-pipeline = RAGPipeline(config_path="config.json")
-
-# Query the system
-query = "What are the key benefits?"
-response = pipeline.query(query)
-
-print(f"Answer: {response['answer']}")
-print(f"Retrieved chunks: {response['context']}")
-print(f"Evaluation scores: {response['scores']}")
-```
+UI Customization
+----------------
+The interface is optimized for a premium reading experience:
+- Glassmorphic Sidebar: Clean, transparent design for chat history.
+- Typography: Uses Noto Naskh Arabic for beautiful Arabic rendering.
+- RTL/LTR Support: Automatically adapts based on the message language.
 
 ---
 
-## Evaluation
-
-The pipeline includes an automated evaluation framework that measures:
-
-- **Retrieval Precision** — How relevant are the retrieved chunks to the query?
-- **Answer Faithfulness** — Does the response stay grounded in the retrieved context (no hallucinations)?
-- **Answer Relevance** — Does the response directly address the original question?
-
-Evaluation results are stored in `results/` for benchmarking across different models and configurations.
-
----
-
-## Performance Considerations
-
-| Aspect | Local Ollama | Cloud API |
-|--------|-------------|-----------|
-| **Cost** | Free | Per-token billing |
-| **Privacy** | On-device only | Sent to provider |
-| **Speed** | Hardware-dependent | Network + processing |
-| **Control** | Full (model choice, params) | Limited to API options |
-| **Offline** |  Yes |  Requires internet |
-
-For production use, start with `mistral` (fast, 7B params) or `neural-chat` (optimized, 7B). Use `llama2` (13B) for higher quality if hardware allows.
-
----
-
-## Troubleshooting
-
-**Ollama connection refused?**
-```bash
-# Make sure Ollama is running
-ollama serve
-```
-
-**Model not found?**
-```bash
-# Pull the model first
-ollama pull mistral
-```
-
-**Out of memory?**
-- Use a smaller model: `ollama pull neural-chat` instead of `llama2`
-- Reduce `chunk_size` in config.json
-- Lower `max_tokens` in generation settings
-
----
-
-## License
-
+License
+-------
 MIT License
