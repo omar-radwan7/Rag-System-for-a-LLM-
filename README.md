@@ -4,7 +4,7 @@ BookMind RAG: Local Multilingual Knowledge Retrieval System
 Overview and Academic Vision
 ----------------------------
 
-BookMind is a high-performance, Retrieval-Augmented Generation (RAG) system designed to transform static document repositories—specifically PDF books—into interactive, context-aware knowledge bases. This project explores the intersection of data privacy, local Large Language Model (LLM) inference, and multilingual information retrieval.
+BookMind is a high-performance, Retrieval-Augmented Generation (RAG) system designed to transform static document repositories—specifically PDFs —into interactive, context-aware knowledge bases. This project explores the intersection of data privacy, local Large Language Model (LLM) inference, and multilingual information retrieval.
 
 Developed as part of an intensive research and development initiative at the Applied Innovation Center (AIC), the system addresses the critical need for organizations to interact with sensitive internal data without compromising data sovereignty. The core of this project serves as a foundational prototype for a graduation thesis focusing on localized AI solutions for complex linguistic environments.
 
